@@ -1,0 +1,16 @@
+<resources>
+  <string name="app_name">NFCChat10</string>
+  <string name="servicedesc">Receiver for NFCChat10 messages</string>
+  <string name="clear_all">Clear all</string>
+  <string name="clear">Clear</string>
+  <string name="send">Send</string>
+  <string name="make">Generate</string>
+  <string name="edit_hint">Enter text here</string>
+  <string name="msg_template">Message generated at %s.</string>
+  <string name="prefix_sent">Sent: %s</string>
+  <string name="prefix_received">Rcvd: %s</string>
+  <string name="notify_body">New message received</string>
+  <string name="notify_channel_desc">All notifications</string>
+  <string name="status_receive">Ready to receive...</string>
+  <string name="status_send">Ready to send...</string>
+</resources>
