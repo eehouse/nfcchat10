@@ -25,7 +25,7 @@ import android.content.Context;
 import java.util.Formatter;
 
 public class Log {
-    private static final String PRE_TAG = BuildConfig.APPLICATION_ID + "-";
+    private static final String PRE_TAG = ""; // BuildConfig.APPLICATION_ID + "-";
     private static final boolean LOGGING_ENABLED = BuildConfig.DEBUG;
     private static final boolean ERROR_LOGGING_ENABLED = true;
     private static boolean sEnabled = BuildConfig.DEBUG;
