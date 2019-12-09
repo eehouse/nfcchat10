@@ -191,7 +191,6 @@ public class HostApduServiceExt extends HostApduService {
             void onReadingChange( boolean nowReading );
             Msg[] getMsgs();
             void onMsgAcked( Msg msg );
-            // void onMsgReceived( byte[] payload );
         }
 
         public Wrapper( Activity activity, Procs procs )
