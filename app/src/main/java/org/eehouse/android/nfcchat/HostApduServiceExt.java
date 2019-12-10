@@ -290,7 +290,7 @@ public class HostApduServiceExt extends HostApduService {
 
         private void scheduleToggle()
         {
-            int intervalMS = mMinMS + mRandom.nextInt() % (mMaxMS - mMinMS);
+            int intervalMS = mMinMS + Math.abs(mRandom.nextInt()) % (mMaxMS - mMinMS);
             mHandler.postDelayed( this, intervalMS );
         }
     }
