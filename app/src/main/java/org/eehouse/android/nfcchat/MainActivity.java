@@ -117,8 +117,13 @@ public class MainActivity extends AppCompatActivity
     public void onReadingChange( boolean nowReading )
     {
         Log.d( TAG, "onReadingChange(nowReading=" + nowReading + ")" );
-        String txt = getString( nowReading ? R.string.status_send : R.string.status_receive );
-        mReadingStatus.setText( txt );
+        final String txt = getString( nowReading ? R.string.status_send : R.string.status_receive );
+        runOnUiThread( new Runnable() {
+                @Override
+                public void run() {
+                    mReadingStatus.setText( txt );
+                }
+            } );
     }
 
     @Override

@@ -2,13 +2,11 @@
 
 package org.eehouse.android.nfcchat;
 
-import android.os.Handler;
 import android.app.Activity;
 import android.content.Context;
 import android.nfc.NfcAdapter;
 import android.nfc.Tag;
 import android.nfc.cardemulation.HostApduService;
-import android.nfc.tech.IsoDep;
 import android.nfc.tech.IsoDep;
 import android.os.Bundle;
 
@@ -104,23 +102,6 @@ public class HostApduServiceExt extends HostApduService {
                 ++mReceivedCount;
                 resStr = STATUS_SUCCESS;
                 break;
-            // case CMD_MSG_REQ:
-            //     Log.d( TAG, "CMD_MSG_REQ case" );
-            //     List<DBHelper.Msg> msgs = DBHelper.getPendingMessages( context );
-            //     if ( msgs.size() == 0 ) {
-            //         resStr = STATUS_NOMSGS;
-            //         Log.d( TAG, "no messages: STATUS_NOMSGS" );
-            //     } else {
-            //         DBHelper.Msg msg = msgs.get(0);
-            //         result = wrapMsg( msg.getText() );
-            //         Log.d( TAG, "wrapping message" );
-
-            //         // This is very bad! There needs to be something sent back
-            //         // from the remote to confirm receipt before we can nuke
-            //         // the thing in the DB. PENDING
-            //         DBHelper.markSent( context, msg );
-            //     }
-                // break;
             default:
                 Assert.fail();
             }
@@ -149,39 +130,14 @@ public class HostApduServiceExt extends HostApduService {
         return result;
     }
 
-    // private static void requestMessages( Context context, IsoDep isoDep )
-    // {
-    //     Log.d( TAG, "requestMessages()" );
-    //     byte[] req = { CMD_MSG_REQ };
-    //     for ( ; ; ) {
-    //         try {
-    //             byte[] response = isoDep.transceive( req );
-    //             Log.d( TAG, "transceive() => " + response[0] + "..." );
-    //             if ( STATUS_NOMSGS.equals( Utils.byteArraytoHexString(response) ) ) {
-    //                 break;
-    //             }
-    //             response = handleCommand( context, response );
-    //             if ( ! responseIsGood( response ) ) {
-    //                 break;
-    //             }
-    //         } catch ( IOException ioe ) {
-    //             Log.e( TAG, "got ioe: " + ioe.getMessage() );
-    //             break;
-    //         }
-    //     }
-    // }
-
-    public static class Wrapper implements NfcAdapter.ReaderCallback, Runnable {
+    public static class Wrapper implements NfcAdapter.ReaderCallback {
         private Activity mActivity;
-        private boolean mResumed = false;
         private boolean mHaveData = false;
-        private boolean mInReadSlot = false;
         private NfcAdapter mAdapter;
         private Procs mProcs;
-        private Handler mHandler;
-        private Random mRandom;
-        private int mMinMS = 700;
-        private int mMaxMS = 300;
+        private final int mMinMS = 700;
+        private final int mMaxMS = 300;
+        private boolean mConnected = false;
 
         public interface Msg {
             public byte[] getPayload();
@@ -198,16 +154,14 @@ public class HostApduServiceExt extends HostApduService {
             mActivity = activity;
             mProcs = procs;
             mAdapter = NfcAdapter.getDefaultAdapter( activity );
-            mHandler = new Handler();
-            mRandom = new Random();
-            scheduleToggle();
         }
 
         public void setResumed( boolean resumed )
         {
-            if ( mResumed != resumed ) {
-                mResumed = resumed;
-                disEnableReaderMode();
+            if ( resumed ) {
+                startReadModeThread();
+            } else {
+                stopReadModeThread();
             }
         }
 
@@ -215,28 +169,16 @@ public class HostApduServiceExt extends HostApduService {
         {
             if ( mHaveData != haveData ) {
                 mHaveData = haveData;
-                disEnableReaderMode();
+                interruptThread();
             }
-        }
-
-        @Override
-        // To be called to toggle our being on/off as part of rendezvous
-        // algorithm
-        public void run()
-        {
-             if ( mResumed ) {
-                mInReadSlot = !mInReadSlot;
-                disEnableReaderMode();
-            }
-            scheduleToggle();
         }
 
         @Override
         public void onTagDiscovered( Tag tag )
         {
             Log.d( TAG, "onTagDiscovered()" );
+            mConnected = true;
             Msg[] msgs = mProcs.getMsgs();
-            // List<DBHelper.Msg> msgs = DBHelper.getPendingMessages( this );
             IsoDep isoDep = IsoDep.get( tag );
             try {
                 isoDep.connect();
@@ -255,43 +197,118 @@ public class HostApduServiceExt extends HostApduService {
                             break;
                         }
                         mProcs.onMsgAcked( msg );
-                        // DBHelper.markSent( this, msg );
                     }
                 }
 
-                // requestMessages( mActivity, isoDep );
-
                 isoDep.close();
-
-            //     // rebuildList();
             } catch ( IOException ioe ) {
                 Log.e( TAG, "got ioe: " + ioe.getMessage() );
             }
+
+            mConnected = false;
             Log.d( TAG, "onTagDiscovered() DONE" );
         }
 
-        private void disEnableReaderMode()
-        {
-            if ( mAdapter != null ) {
-                // Log.d( TAG, "mResumed: " + mResumed
-                //        + "; mHaveData: " + mHaveData
-                //        + "; mInReadSlot: " + mInReadSlot );
-                boolean reading = mResumed && mHaveData && mInReadSlot;
-                if ( reading ) {
-                    int flags = NfcAdapter.FLAG_READER_NFC_A
-                        | NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK;
-                    mAdapter.enableReaderMode( mActivity, this, flags, null );
-                } else {
-                    mAdapter.disableReaderMode( mActivity );
+        private class ReadModeThread extends Thread {
+            private boolean mShouldStop = false;
+            private boolean mInReadMode = false;
+            private final int mFlags = NfcAdapter.FLAG_READER_NFC_A
+                | NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK;
+
+            @Override
+            public void run()
+            {
+                Log.d( TAG, "ReadModeThread.run() starting" );
+
+                Random random = new Random();
+
+                while ( !mShouldStop ) {
+                    toggle();
+
+                    try {
+                        // How long to sleep.
+                        int intervalMS = mMinMS + (Math.abs(random.nextInt())
+                                                   % (mMaxMS - mMinMS));
+                        // Log.d( TAG, "sleeping for %d ms", intervalMS );
+                        Thread.sleep( intervalMS );
+                    } catch ( InterruptedException ie ) {
+                        Log.d( TAG, "run interrupted" );
+                    }
                 }
-                mProcs.onReadingChange( reading );
+
+                // Kill read mode on the way out
+                if ( mInReadMode ) {
+                    mAdapter.disableReaderMode( mActivity );
+                    mInReadMode = false;
+                }
+
+                // Clear the reference only if it's me
+                synchronized ( mThreadRef ) {
+                    if ( mThreadRef[0] == this ) {
+                        mThreadRef[0] = null;
+                    }
+                }
+                Log.d( TAG, "ReadModeThread.run() exiting" );
+            }
+
+            public void doStop()
+            {
+                mShouldStop = true;
+                interrupt();
+            }
+
+            private void toggle()
+            {
+                boolean wantReadMode = mConnected || !mInReadMode && mHaveData;
+                if ( wantReadMode && !mInReadMode ) {
+                    mAdapter.enableReaderMode( mActivity, Wrapper.this, mFlags, null );
+                    mProcs.onReadingChange( true );
+                } else if ( mInReadMode && !wantReadMode ) {
+                    mAdapter.disableReaderMode( mActivity );
+                    mProcs.onReadingChange( false );
+                }
+                mInReadMode = wantReadMode;
+                Log.d( TAG, "toggle(): mInReadMode now: %b", mInReadMode );
             }
         }
 
-        private void scheduleToggle()
+        private ReadModeThread[] mThreadRef = {null};
+
+        private void interruptThread()
         {
-            int intervalMS = mMinMS + Math.abs(mRandom.nextInt()) % (mMaxMS - mMinMS);
-            mHandler.postDelayed( this, intervalMS );
+            synchronized ( mThreadRef ) {
+                if ( null != mThreadRef[0] ) {
+                    mThreadRef[0].interrupt();
+                }
+            }
+        }
+
+        private void startReadModeThread()
+        {
+            synchronized ( mThreadRef ) {
+                if ( null == mThreadRef[0] ) {
+                    mThreadRef[0] = new ReadModeThread();
+                    mThreadRef[0].start();
+                }
+            }
+        }
+
+        private void stopReadModeThread()
+        {
+            ReadModeThread thread;
+            synchronized ( mThreadRef ) {
+                thread = mThreadRef[0];
+                mThreadRef[0] = null;
+            }
+
+            if ( null != thread ) {
+                thread.doStop();
+                try {
+                    thread.join();
+                } catch ( InterruptedException ex ) {
+                    Log.d( TAG, "stopReadModeThread(): %s", ex );
+                }
+            }
         }
     }
 }
