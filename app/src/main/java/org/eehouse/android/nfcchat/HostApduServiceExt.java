@@ -10,10 +10,10 @@ import android.nfc.cardemulation.HostApduService;
 import android.nfc.tech.IsoDep;
 import android.os.Bundle;
 
-import java.util.Random;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Random;
 
 public class HostApduServiceExt extends HostApduService {
     private static final String TAG = HostApduServiceExt.class.getSimpleName();
@@ -206,6 +206,7 @@ public class HostApduServiceExt extends HostApduService {
             }
 
             mConnected = false;
+            interruptThread();
             Log.d( TAG, "onTagDiscovered() DONE" );
         }
 
@@ -223,13 +224,26 @@ public class HostApduServiceExt extends HostApduService {
                 Random random = new Random();
 
                 while ( !mShouldStop ) {
-                    toggle();
+                    boolean wantReadMode = mConnected || !mInReadMode && mHaveData;
+                    if ( wantReadMode && !mInReadMode ) {
+                        mAdapter.enableReaderMode( mActivity, Wrapper.this, mFlags, null );
+                        mProcs.onReadingChange( true );
+                    } else if ( mInReadMode && !wantReadMode ) {
+                        mAdapter.disableReaderMode( mActivity );
+                        mProcs.onReadingChange( false );
+                    }
+                    mInReadMode = wantReadMode;
+                    Log.d( TAG, "mInReadMode now: %b", mInReadMode );
 
+                    // Now sleep. If we aren't going to want to toggle read
+                    // mode soon, sleep until interrupted by a state change,
+                    // e.g. getting data or losing connection.
+                    long intervalMS = Long.MAX_VALUE;
+                    if ( (mInReadMode && !mConnected) || mHaveData ) {
+                        intervalMS = mMinMS + (Math.abs(random.nextInt())
+                                               % (mMaxMS - mMinMS));
+                    }
                     try {
-                        // How long to sleep.
-                        int intervalMS = mMinMS + (Math.abs(random.nextInt())
-                                                   % (mMaxMS - mMinMS));
-                        // Log.d( TAG, "sleeping for %d ms", intervalMS );
                         Thread.sleep( intervalMS );
                     } catch ( InterruptedException ie ) {
                         Log.d( TAG, "run interrupted" );
@@ -255,20 +269,6 @@ public class HostApduServiceExt extends HostApduService {
             {
                 mShouldStop = true;
                 interrupt();
-            }
-
-            private void toggle()
-            {
-                boolean wantReadMode = mConnected || !mInReadMode && mHaveData;
-                if ( wantReadMode && !mInReadMode ) {
-                    mAdapter.enableReaderMode( mActivity, Wrapper.this, mFlags, null );
-                    mProcs.onReadingChange( true );
-                } else if ( mInReadMode && !wantReadMode ) {
-                    mAdapter.disableReaderMode( mActivity );
-                    mProcs.onReadingChange( false );
-                }
-                mInReadMode = wantReadMode;
-                Log.d( TAG, "toggle(): mInReadMode now: %b", mInReadMode );
             }
         }
 
